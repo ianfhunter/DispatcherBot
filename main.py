@@ -3,7 +3,7 @@ import json
 import re
 import sys
 sys.path.append("..")
-from RoomGenerator.main import RoomFactory, Cell
+from RoomGenerator.DungeonTracker import DungeonTracker
 
 client = discord.Client()
 
@@ -19,61 +19,73 @@ game_settings = {
     
 }
 
+def areInGame(channel):
+    if channel.id not in game_settings:
+        return False
+    return True
+
+async def showRoom(channel):
+    dungeon = game_settings[channel.id]["dungeon"]
+    room_img = dungeon.draw()
+    await channel.send(file=discord.File(room_img))
+    room_description = dungeon.describe()
+    game_settings[channel.id]["started"] = True
+    await channel.send(f"You enter the room. \n {room_description}")
+
+
+async def connect_player(player, channel):
+    
+    if channel.id not in game_settings:
+        await channel.send("Session opened")
+
+        game_settings[channel.id] = {}
+        game_settings[channel.id]["started"]= False
+        d = DungeonTracker()
+        game_settings[channel.id]["dungeon"] = d
+
+    d = game_settings[channel.id]["dungeon"]
+    d.add_player(player)
+
+    await channel.send(
+        f"""Welcome to the game {player}."""
+    )
+    return True
+
 @client.event
 async def on_message(message):
+    global game_settings
+
     print(message.content)
     if message.author == client.user:
         return
 
     if message.content.startswith('$choose'):
-        get_choice = re.search(r'\d+', message.content).group()
-        if get_choice is not None:
-            print("Choice:", get_choice)
+        await connect_player(message.author, message.channel)
 
-            choices = {
-                "1": Cell.Type.PLAYER_FIGHTER,
-                "2": Cell.Type.PLAYER_ARCHER,
-                "3": Cell.Type.PLAYER_MAGE,
-                "4": Cell.Type.PLAYER_CLERIC,
-                "5": Cell.Type.PLAYER_DRUID,
-                "6": Cell.Type.PLAYER_BMAGE,
-                "7": Cell.Type.PLAYER_PALADIN
-            }
-            character = choices[str(get_choice)]
-            room = game_settings[message.channel.id]["room"]
-            rf = game_settings[message.channel.id]["room_factory"]
-            rf.insert_thing(room, character)
-            room_img = room.show(gui="img")
-            await message.channel.send("Good choice. You have entered the game")
+        choice = re.search(r'\d+', message.content).group()
+        if choice is not None:
+            print("Choice:", choice)
+            dungeon = game_settings[message.channel.id]["dungeon"]
+            player = dungeon.get_player(message.author)
+            player.choose_icon(choice)
+            await message.channel.send("Good choice. Icon Changed")
             
-            # await message.channel.send(file=discord.File(room_img))
-            
-
-
     if message.content.startswith('$open'):
         # TODO: Check if in combat
-        pass
+        if areInGame(message.channel):
+            dungeon = game_settings[message.channel.id]["dungeon"]
+            dungeon.nextRoom()
+            await showRoom(message.channel)
+        
 
     if message.content.startswith('$join'):
+        await connect_player(message.author, message.channel)
 
-        if message.channel.id not in game_settings:
-            await message.channel.send("Session opened")
-            rf = RoomFactory()
-            r = rf.create_room()
-            game_settings[message.channel.id] = {}
-            game_settings[message.channel.id]["room_factory"] = rf
-            game_settings[message.channel.id]["room"] = r
-            game_settings[message.channel.id]["started"]= False
-
-
-        await message.channel.send(
-            f"""Welcome to the game {message.author}."""
-        )   
         if message.author not in player_settings:
             await message.channel.send("""
-                Before we can add you, what would you like to represent your character?
+                Before adventuring, what would you like to represent your character?
                   use $choose <num> to pick from:
-                  1) Fighter
+                  1) Fighter (default)
                   2) Archer
                   3) Mage
                   4) Cleric
@@ -86,12 +98,7 @@ async def on_message(message):
     if message.content.startswith('$start'):
         if message.channel.id in game_settings:
             if not game_settings[message.channel.id]["started"]:
-                r = game_settings[message.channel.id]["room"]
-                room_img = r.show(gui="img")
-                await message.channel.send(file=discord.File(room_img))
-                room_description = r.show(gui="describe")
-                game_settings[message.channel.id]["started"] = True
-                await message.channel.send(f"You enter the room. \n {room_description}")
+                await showRoom(message.channel)
             else:
                 await message.channel.send("A game is already in progress. You can cancel it with $end")
 
